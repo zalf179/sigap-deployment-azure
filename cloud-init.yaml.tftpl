@@ -1,0 +1,41 @@
+#cloud-config
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+
+write_files:
+  - path: /usr/local/bin/setup-sigap.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euxo pipefail
+
+      # Data disk di-attach setelah VM jadi, jadi tunggu dulu sampai muncul
+      DISK=/dev/disk/azure/scsi1/lun0
+      while [ ! -e "$DISK" ]; do sleep 5; done
+
+      # Format cuma kalau disk masih kosong
+      blkid "$DISK" >/dev/null 2>&1 || mkfs.ext4 -F "$DISK"
+      mkdir -p /data
+      UUID=$(blkid -s UUID -o value "$DISK")
+      grep -q "$UUID" /etc/fstab || echo "UUID=$UUID /data ext4 defaults,nofail 0 2" >> /etc/fstab
+      mount -a
+
+      # Install Docker
+      curl -fsSL https://get.docker.com | sh
+      usermod -aG docker ${admin_username}
+
+      # Pindahkan data Docker ke data disk
+      systemctl stop docker docker.socket
+      mkdir -p /data/docker
+      echo '{"data-root": "/data/docker"}' > /etc/docker/daemon.json
+      systemctl start docker
+
+      # Ambil kode aplikasi (belum dijalankan, .env diisi manual dulu)
+      git clone ${repo_url} /opt/sigap
+      chown -R ${admin_username}:${admin_username} /opt/sigap
+
+runcmd:
+  - [bash, /usr/local/bin/setup-sigap.sh]
